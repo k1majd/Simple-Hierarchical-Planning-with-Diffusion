@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.cpython-*.pyc
+*.wandb
+/logs/
+**.egg-info/

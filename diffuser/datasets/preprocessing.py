@@ -1,10 +1,14 @@
-import gym
 import numpy as np
 import einops
 from scipy.spatial.transform import Rotation as R
 import pdb
 
-from .d4rl import load_environment
+
+def _load_environment(env):
+    from .d4rl import load_environment
+
+    return load_environment(env)
+
 
 # -----------------------------------------------------------------------------#
 # -------------------------------- general api --------------------------------#
@@ -71,7 +75,7 @@ def add_deltas(env):
 
 
 def maze2d_set_terminals(env):
-    env = load_environment(env) if type(env) == str else env
+    env = _load_environment(env) if type(env) == str else env
     goal = np.array(env._target)
     threshold = 0.5
 
@@ -96,6 +100,49 @@ def maze2d_set_terminals(env):
 
         dataset["timeouts"] = timeouts
         dataset["terminals"] = np.zeros_like(dataset["terminals"])
+        return dataset
+
+    return _fn
+
+
+def navigation_set_terminals(final_goal):
+    """
+    Preprocessing function for the custom navigation dataset.
+    Re-segments episodes so that terminal=True only when the current segment's
+    goal matches `final_goal`. This concatenates the short 51-step segments
+    into longer multi-goal episodes (~255-306 steps).
+    """
+    final_goal = np.array(final_goal)
+
+    def _fn(dataset):
+        goals = dataset["infos/goal"]
+        old_terminals = dataset["terminals"].astype(bool)
+        old_timeouts = dataset["timeouts"].astype(bool)
+
+        # find where original episodes end
+        term_indices = np.where(old_terminals | old_timeouts)[0]
+
+        # only keep terminals where the goal matches the final goal
+        new_terminals = np.zeros_like(dataset["terminals"], dtype=bool)
+        new_timeouts = np.zeros_like(dataset["timeouts"], dtype=bool)
+
+        for ti in term_indices:
+            if np.allclose(goals[ti], final_goal, atol=0.01):
+                new_terminals[ti] = True
+                new_timeouts[ti] = True
+
+        new_term_indices = np.where(new_terminals)[0]
+        ep_lens = np.diff(np.concatenate([[-1], new_term_indices])).astype(int)
+
+        print(
+            f"[ preprocessing ] Re-segmented navigation dataset | "
+            f"{len(new_term_indices)} episodes | "
+            f"min length: {ep_lens.min()} | max length: {ep_lens.max()} | "
+            f"mean length: {ep_lens.mean():.1f}"
+        )
+
+        dataset["terminals"] = new_terminals
+        dataset["timeouts"] = new_timeouts
         return dataset
 
     return _fn
@@ -251,7 +298,9 @@ def blocks_cumsum_quat(deltas):
 
         cumsum_euler = einops.rearrange(cumsum_euler, "b h e -> (b h) e")
         cumsum_quat = R.from_euler("xyz", cumsum_euler).as_quat()
-        cumsum_quat = einops.rearrange(cumsum_quat, "(b h) q -> b h q", b=batch_size)
+        cumsum_quat = einops.rearrange(
+            cumsum_quat, "(b h) q -> b h q", b=batch_size
+        )
 
         cumsum[:, :, start:end] = cumsum_quat.copy()
 

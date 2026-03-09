@@ -58,7 +58,7 @@ class Parser(Tap):
         if not hasattr(args, "config"):
             return args
         args = self.read_config(args, experiment)
-        # self.add_extras(args)
+        self.add_extras(args)
         self.eval_fstrings(args)
         self.set_seed(args)
         self.get_commit(args)
@@ -114,7 +114,9 @@ class Parser(Tap):
             ), f"[ utils/setup ] {key} not found in config: {args.config}"
             old_val = getattr(args, key)
             old_type = type(old_val)
-            print(f"[ utils/setup ] Overriding config | {key} : {old_val} --> {val}")
+            print(
+                f"[ utils/setup ] Overriding config | {key} : {old_val} --> {val}"
+            )
             if val == "None":
                 val = None
             elif val == "latest":
@@ -165,7 +167,9 @@ class Parser(Tap):
             and "dataset" in dir(args)
             and "exp_name" in dir(args)
         ):
-            args.savepath = os.path.join(args.logbase, args.dataset, args.exp_name)
+            args.savepath = os.path.join(
+                args.logbase, args.dataset, args.exp_name
+            )
             self._dict["savepath"] = args.savepath
             if "suffix" in dir(args):
                 args.savepath = os.path.join(args.savepath, args.suffix)

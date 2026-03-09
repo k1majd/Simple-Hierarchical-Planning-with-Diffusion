@@ -3,9 +3,9 @@ import numpy as np
 import einops
 import imageio
 import matplotlib.pyplot as plt
+import warnings
+from matplotlib.patches import Rectangle
 from matplotlib.colors import ListedColormap
-import gym
-import mujoco_py as mjc
 import warnings
 import pdb
 from math import pi
@@ -13,8 +13,18 @@ from math import pi
 from .arrays import to_np
 from .video import save_video, save_videos
 
-from diffuser.datasets.d4rl import load_environment
-from d4rl.pointmaze import maze_model
+
+def _load_environment(name):
+    from diffuser.datasets.d4rl import load_environment
+
+    return load_environment(name)
+
+
+def _get_maze_model():
+    from d4rl.pointmaze import maze_model
+
+    return maze_model
+
 
 # -----------------------------------------------------------------------------#
 # ------------------------------- helper structs ------------------------------#
@@ -77,12 +87,16 @@ def plot2img(fig, remove_margins=True):
     from matplotlib.backends.backend_agg import FigureCanvasAgg
 
     if remove_margins:
-        fig.subplots_adjust(left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
+        fig.subplots_adjust(
+            left=0, bottom=0, right=1, top=1, wspace=0, hspace=0
+        )
 
     canvas = FigureCanvasAgg(fig)
     canvas.draw()
     img_as_string, (width, height) = canvas.print_to_buffer()
-    return np.fromstring(img_as_string, dtype="uint8").reshape((height, width, 4))
+    return np.frombuffer(img_as_string, dtype="uint8").reshape(
+        (height, width, 4)
+    )
 
 
 # -----------------------------------------------------------------------------#
@@ -250,11 +264,17 @@ class MuJoCoRenderer:
         observations_real = observations_real[:, :-1]
 
         images_pred = np.stack(
-            [self._renders(obs_pred, partial=True) for obs_pred in observations_pred]
+            [
+                self._renders(obs_pred, partial=True)
+                for obs_pred in observations_pred
+            ]
         )
 
         images_real = np.stack(
-            [self._renders(obs_real, partial=False) for obs_real in observations_real]
+            [
+                self._renders(obs_real, partial=False)
+                for obs_real in observations_real
+            ]
         )
 
         ## [ batch_size x horizon x H x W x C ]
@@ -274,16 +294,18 @@ class MuJoCoRenderer:
 
         diffusion_path = to_np(diffusion_path)
 
-        n_diffusion_steps, batch_size, _, horizon, joined_dim = diffusion_path.shape
+        n_diffusion_steps, batch_size, _, horizon, joined_dim = (
+            diffusion_path.shape
+        )
 
         frames = []
         for t in reversed(range(n_diffusion_steps)):
             print(f"[ utils/renderer ] Diffusion: {t} / {n_diffusion_steps}")
 
             ## [ batch_size x horizon x observation_dim ]
-            states_l = diffusion_path[t].reshape(batch_size, horizon, joined_dim)[
-                :, :, : self.observation_dim
-            ]
+            states_l = diffusion_path[t].reshape(
+                batch_size, horizon, joined_dim
+            )[:, :, : self.observation_dim]
 
             frame = []
             for states in states_l:
@@ -364,7 +386,10 @@ class MazeRenderer:
 
         nrow = len(images) // ncol
         images = einops.rearrange(
-            images, "(nrow ncol) H W C -> (nrow H) (ncol W) C", nrow=nrow, ncol=ncol
+            images,
+            "(nrow ncol) H W C -> (nrow H) (ncol W) C",
+            nrow=nrow,
+            ncol=ncol,
         )
         imageio.imsave(savepath, images)
         print(f"Saved {len(paths)} samples to: {savepath}")
@@ -393,7 +418,9 @@ class Maze2dRenderer(MazeRenderer):
             observations[:, 0] /= iscale
             observations[:, 1] /= jscale
         else:
-            raise RuntimeError(f"Unrecognized bounds for {self.env_name}: {bounds}")
+            raise RuntimeError(
+                f"Unrecognized bounds for {self.env_name}: {bounds}"
+            )
 
         if conditions is not None:
             conditions /= scale
@@ -438,3 +465,114 @@ def rollout_from_state(env, state, actions):
         ## if terminated early, pad with zeros
         observations.append(np.zeros(obs.size))
     return np.stack(observations)
+
+
+class NavigationRenderer:
+    """
+    Simple 2D trajectory renderer for custom navigation datasets.
+    Plots x-y positions without requiring gym/mujoco.
+    """
+
+    def __init__(self, env=None, observation_dim=None):
+        # Borrow geometry convention from generate_data.py's rectangle obstacle setup.
+        self._parking_spots = [[4.0, 22.0, 24.0, 14.0]]
+        self._padding = -0.5
+        self._x_limits = (-10, 40)
+        self._y_limits = (-10, 40)
+
+    def _draw_obstacles(self, ax):
+        """
+        Draw static rectangle obstacles from parking-spot specs.
+        Rectangle format matches generate_data.py: [x_left, y_top, width, height].
+        """
+        for rect in self._parking_spots:
+            x_left, y_top, width, height = rect
+            padded_x = x_left - self._padding
+            padded_y = y_top - self._padding
+            padded_w = width + 2 * self._padding
+            padded_h = height + 2 * self._padding
+
+            patch = Rectangle(
+                (padded_x, padded_y - padded_h),
+                padded_w,
+                padded_h,
+                facecolor="lightgray",
+                edgecolor="black",
+                linewidth=1.0,
+                alpha=0.6,
+                zorder=1,
+            )
+            ax.add_patch(patch)
+
+    def renders(self, observations, conditions=None, title=None):
+        fig, ax = plt.subplots(figsize=(10, 8))
+
+        self._draw_obstacles(ax)
+
+        path_length = len(observations)
+        colors = plt.cm.jet(np.linspace(0, 1, path_length))
+        ax.plot(
+            observations[:, 0],
+            observations[:, 1],
+            c="black",
+            linewidth=1.2,
+            zorder=10,
+        )
+        ax.scatter(
+            observations[:, 0], observations[:, 1], c=colors, s=10, zorder=20
+        )
+
+        ax.scatter(
+            observations[0, 0],
+            observations[0, 1],
+            color="green",
+            marker="o",
+            s=70,
+            label="Start",
+        )
+        ax.scatter(
+            observations[-1, 0],
+            observations[-1, 1],
+            color="red",
+            marker="x",
+            s=80,
+            label="End",
+        )
+
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_xlim(*self._x_limits)
+        ax.set_ylim(*self._y_limits)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper right")
+        if title:
+            ax.set_title(title)
+        img = plot2img(fig, remove_margins=False)
+        plt.close(fig)
+        return img
+
+    def composite(self, savepath, paths, ncol=5, **kwargs):
+        # adjust ncol if fewer paths
+        ncol = min(ncol, len(paths))
+        if len(paths) % ncol != 0:
+            # pad to make divisible
+            pad = ncol - (len(paths) % ncol)
+            for _ in range(pad):
+                paths = list(paths) + [paths[-1]]
+
+        images = []
+        for path, kw in zipkw(paths, **kwargs):
+            img = self.renders(*path, **kw)
+            images.append(img)
+        images = np.stack(images, axis=0)
+
+        nrow = len(images) // ncol
+        images = einops.rearrange(
+            images,
+            "(nrow ncol) H W C -> (nrow H) (ncol W) C",
+            nrow=nrow,
+            ncol=ncol,
+        )
+        imageio.imsave(savepath, images)
+        print(f"Saved {len(paths)} samples to: {savepath}")

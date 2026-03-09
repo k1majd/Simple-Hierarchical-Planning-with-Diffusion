@@ -5,13 +5,11 @@ import pdb
 import os
 
 from .preprocessing import get_preprocess_fn
-from .d4rl import load_environment, sequence_dataset
 from .normalization import DatasetNormalizer
 from .buffer import ReplayBuffer
 from math import pi
 import h5py
 from tqdm import tqdm
-from d4rl.pointmaze import maze_model
 
 Batch = namedtuple("Batch", "trajectories conditions")
 ValueBatch = namedtuple("ValueBatch", "trajectories conditions values")
@@ -41,7 +39,9 @@ class SequenceDataset(torch.utils.data.Dataset):
         itr = sequence_dataset(env, self.preprocess_fn, load_path=load_path)
         self.jump = jump
         self.jump_action = jump_action
-        fields = ReplayBuffer(max_n_episodes, max_path_length, termination_penalty)
+        fields = ReplayBuffer(
+            max_n_episodes, max_path_length, termination_penalty
+        )
         for i, episode in enumerate(itr):
             fields.add_path(episode)
         fields.finalize()
@@ -65,7 +65,9 @@ class SequenceDataset(torch.utils.data.Dataset):
         normalize fields that will be predicted by the diffusion model
         """
         for key in keys:
-            array = self.fields[key].reshape(self.n_episodes * self.max_path_length, -1)
+            array = self.fields[key].reshape(
+                self.n_episodes * self.max_path_length, -1
+            )
             normed = self.normalizer(array, key)
             self.fields[f"normed_{key}"] = normed.reshape(
                 self.n_episodes, self.max_path_length, -1
@@ -147,7 +149,9 @@ class ValueDataset(SequenceDataset):
     def __init__(self, *args, discount=0.99, **kwargs):
         super().__init__(*args, **kwargs)
         self.discount = discount
-        self.discounts = self.discount ** np.arange(self.max_path_length)[:, None]
+        self.discounts = (
+            self.discount ** np.arange(self.max_path_length)[:, None]
+        )
 
     def __getitem__(self, idx):
         batch = super().__getitem__(idx)
