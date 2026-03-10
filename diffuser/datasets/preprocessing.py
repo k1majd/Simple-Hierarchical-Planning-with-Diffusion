@@ -148,6 +148,68 @@ def navigation_set_terminals(final_goal):
     return _fn
 
 
+def navigation_angles_to_sincos(
+    env=None, obs_angle_indices=(2, 3, 5), action_angle_indices=(1,)
+):
+    """
+    Replace angle-like channels with sin/cos pairs.
+
+    For navigation states (default):
+      observations [x, y, theta1, theta2, v, delta]
+      -> [x, y, sin(theta1), cos(theta1), sin(theta2), cos(theta2), v, sin(delta), cos(delta)]
+
+    For actions (default):
+      actions [a, omega]
+      -> [a, sin(omega), cos(omega)]
+    """
+
+    def _transform(arr, angle_indices):
+        arr = np.asarray(arr)
+        if arr.ndim != 2:
+            return arr
+
+        dim = arr.shape[1]
+        valid_angle_indices = sorted([i for i in angle_indices if 0 <= i < dim])
+        if not valid_angle_indices:
+            return arr
+
+        transformed = []
+        angle_set = set(valid_angle_indices)
+        for i in range(dim):
+            col = arr[:, i : i + 1]
+            if i in angle_set:
+                transformed.append(np.sin(col))
+                transformed.append(np.cos(col))
+            else:
+                transformed.append(col)
+        return np.concatenate(transformed, axis=1)
+
+    def _fn(dataset):
+        obs_before = dataset["observations"].shape[1]
+        act_before = dataset["actions"].shape[1]
+
+        dataset["observations"] = _transform(
+            dataset["observations"], obs_angle_indices
+        )
+        if "next_observations" in dataset:
+            dataset["next_observations"] = _transform(
+                dataset["next_observations"], obs_angle_indices
+            )
+        dataset["actions"] = _transform(
+            dataset["actions"], action_angle_indices
+        )
+
+        obs_after = dataset["observations"].shape[1]
+        act_after = dataset["actions"].shape[1]
+        print(
+            f"[ preprocessing ] navigation_angles_to_sincos | obs_dim: {obs_before} -> {obs_after} | "
+            f"action_dim: {act_before} -> {act_after}"
+        )
+        return dataset
+
+    return _fn
+
+
 # -------------------------- block-stacking --------------------------#
 
 

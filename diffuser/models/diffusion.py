@@ -82,14 +82,86 @@ class GaussianDiffusion(nn.Module):
         )
         self.register_buffer(
             "posterior_mean_coef2",
-            (1.0 - alphas_cumprod_prev) * np.sqrt(alphas) / (1.0 - alphas_cumprod),
+            (1.0 - alphas_cumprod_prev)
+            * np.sqrt(alphas)
+            / (1.0 - alphas_cumprod),
         )
 
         ## get loss coefficients and initialize objective
-        loss_weights = self.get_loss_weights(action_weight, loss_discount, loss_weights)
+        loss_weights = self.get_loss_weights(
+            action_weight, loss_discount, loss_weights
+        )
         self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
         self.condition = condition
         self.sample_noise = True
+
+    def _wrapped_abs_error(self, pred, targ):
+        return torch.abs(
+            torch.atan2(torch.sin(pred - targ), torch.cos(pred - targ))
+        )
+
+    def _orientation_metrics(self, pred, targ):
+        """
+        Compute orientation diagnostics from reconstructed trajectories.
+        Supports both raw-angle and sin/cos encoded observation layouts.
+        """
+        obs_pred = pred[:, :, self.action_dim :]
+        obs_targ = targ[:, :, self.action_dim :]
+        obs_dim = obs_pred.shape[-1]
+
+        # Default zero metrics for models without orientation channels.
+        heading_error = torch.zeros((), device=pred.device)
+        hitch_error = torch.zeros((), device=pred.device)
+
+        # Sin/cos encoded layout produced by navigation_angles_to_sincos:
+        # [x, y, sin(t1), cos(t1), sin(t2), cos(t2), v, sin(delta), cos(delta)]
+        if obs_dim >= 6 and obs_dim != self.observation_dim:
+            pass
+
+        if obs_dim >= 6 and obs_dim >= 9:
+            theta1_pred = torch.atan2(obs_pred[:, :, 2], obs_pred[:, :, 3])
+            theta1_targ = torch.atan2(obs_targ[:, :, 2], obs_targ[:, :, 3])
+            theta2_pred = torch.atan2(obs_pred[:, :, 4], obs_pred[:, :, 5])
+            theta2_targ = torch.atan2(obs_targ[:, :, 4], obs_targ[:, :, 5])
+
+            heading_error = self._wrapped_abs_error(
+                theta1_pred, theta1_targ
+            ).mean()
+
+            hitch_pred = torch.atan2(
+                torch.sin(theta1_pred - theta2_pred),
+                torch.cos(theta1_pred - theta2_pred),
+            )
+            hitch_targ = torch.atan2(
+                torch.sin(theta1_targ - theta2_targ),
+                torch.cos(theta1_targ - theta2_targ),
+            )
+            hitch_error = self._wrapped_abs_error(hitch_pred, hitch_targ).mean()
+            return heading_error, hitch_error
+
+        # Raw-angle layout fallback (navigation-like):
+        # [x, y, theta1, theta2, ...]
+        if obs_dim >= 4:
+            theta1_pred = obs_pred[:, :, 2]
+            theta1_targ = obs_targ[:, :, 2]
+            theta2_pred = obs_pred[:, :, 3]
+            theta2_targ = obs_targ[:, :, 3]
+
+            heading_error = self._wrapped_abs_error(
+                theta1_pred, theta1_targ
+            ).mean()
+
+            hitch_pred = torch.atan2(
+                torch.sin(theta1_pred - theta2_pred),
+                torch.cos(theta1_pred - theta2_pred),
+            )
+            hitch_targ = torch.atan2(
+                torch.sin(theta1_targ - theta2_targ),
+                torch.cos(theta1_targ - theta2_targ),
+            )
+            hitch_error = self._wrapped_abs_error(hitch_pred, hitch_targ).mean()
+
+        return heading_error, hitch_error
 
     def get_loss_weights(self, action_weight, discount, weights_dict):
         """
@@ -131,7 +203,8 @@ class GaussianDiffusion(nn.Module):
         if self.predict_epsilon:
             return (
                 extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
-                - extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
+                - extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
+                * noise
             )
         else:
             return noise
@@ -151,37 +224,53 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract(
             posterior_log_variance_clipped, t, x_t.shape
         )
-        return posterior_mean, posterior_variance, posterior_log_variance_clipped
+        return (
+            posterior_mean,
+            posterior_variance,
+            posterior_log_variance_clipped,
+        )
 
     def p_mean_variance(self, x, cond, t, return_x_recon=False):
-        x_recon = self.predict_start_from_noise(x, t=t, noise=self.model(x, cond, t))
+        x_recon = self.predict_start_from_noise(
+            x, t=t, noise=self.model(x, cond, t)
+        )
 
         if self.clip_denoised:
             x_recon.clamp_(-1.0, 1.0)
         else:
             assert RuntimeError()
 
-        model_mean, posterior_variance, posterior_log_variance = self.q_posterior(
-            x_start=x_recon, x_t=x, t=t
+        model_mean, posterior_variance, posterior_log_variance = (
+            self.q_posterior(x_start=x_recon, x_t=x, t=t)
         )
         if return_x_recon:
-            return model_mean, posterior_variance, posterior_log_variance, x_recon
+            return (
+                model_mean,
+                posterior_variance,
+                posterior_log_variance,
+                x_recon,
+            )
         else:
             return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
     def p_sample(self, x, cond, t):
         b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, cond=cond, t=t)
+        model_mean, _, model_log_variance = self.p_mean_variance(
+            x=x, cond=cond, t=t
+        )
         if self.sample_noise:
             noise = torch.randn_like(x)
         else:
             noise = 0.0 * torch.randn_like(x)
         # no noise when t == 0
-        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
+        nonzero_mask = (1 - (t == 0).float()).reshape(
+            b, *((1,) * (len(x.shape) - 1))
+        )
         return (
             model_mean,
-            model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise,
+            model_mean
+            + nonzero_mask * (0.5 * model_log_variance).exp() * noise,
         )
 
     @torch.no_grad()
@@ -200,7 +289,9 @@ class GaussianDiffusion(nn.Module):
 
         # progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
-            timesteps = torch.full((batch_size,), i, device=device, dtype=torch.long)
+            timesteps = torch.full(
+                (batch_size,), i, device=device, dtype=torch.long
+            )
             x, x_sample = self.p_sample(x_sample, cond, timesteps)
             if self.condition:
                 x = apply_conditioning(x, cond, self.action_dim)
@@ -239,7 +330,8 @@ class GaussianDiffusion(nn.Module):
 
         sample = (
             extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
-            + extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
+            + extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
+            * noise
         )
 
         return sample
@@ -288,7 +380,9 @@ class GaussianDiffusion(nn.Module):
         """
         mean = extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
         variance = extract(1.0 - self.alphas_cumprod, t, x_start.shape)
-        log_variance = extract(self.log_one_minus_alphas_cumprod, t, x_start.shape)
+        log_variance = extract(
+            self.log_one_minus_alphas_cumprod, t, x_start.shape
+        )
         return mean, variance, log_variance
 
     def p_losses(self, x_start, cond, t, return_rec=False):
@@ -309,6 +403,10 @@ class GaussianDiffusion(nn.Module):
         else:
             loss, info = self.loss_fn(x_recon, x_start)
 
+        heading_error, hitch_error = self._orientation_metrics(x_recon, x_start)
+        info["heading_error"] = heading_error
+        info["hitch_error"] = hitch_error
+
         if return_rec:
             return loss, info, x_recon
         else:
@@ -323,7 +421,9 @@ class GaussianDiffusion(nn.Module):
     ):
         batch_size = len(x)
         device = x.device
-        t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
+        t = torch.randint(
+            0, self.n_timesteps, (batch_size,), device=x.device
+        ).long()
         return self.p_losses(x, cond, t, return_rec)
 
     def forward(self, cond, *args, **kwargs):

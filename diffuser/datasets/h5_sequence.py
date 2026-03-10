@@ -116,7 +116,7 @@ class H5GoalDataset(torch.utils.data.Dataset):
         env=None,
         preprocess_fns=None,
     ):
-        from .preprocessing import navigation_set_terminals
+        from .preprocessing import navigation_set_terminals, get_preprocess_fn
 
         self.horizon = horizon
         self.max_path_length = max_path_length
@@ -124,7 +124,14 @@ class H5GoalDataset(torch.utils.data.Dataset):
         self.jump = jump
         self.jump_action = jump_action
 
-        preprocess_fn = navigation_set_terminals(final_goal)
+        base_preprocess = navigation_set_terminals(final_goal)
+        extra_preprocess = get_preprocess_fn(preprocess_fns or [], env)
+
+        def preprocess_fn(dataset):
+            dataset = base_preprocess(dataset)
+            dataset = extra_preprocess(dataset)
+            return dataset
+
         itr = sequence_dataset_h5(h5_path, preprocess_fn)
 
         fields = _H5ReplayBuffer(

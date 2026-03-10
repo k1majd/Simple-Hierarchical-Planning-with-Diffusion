@@ -46,7 +46,7 @@ base = {
         "loader": "datasets.H5GoalDataset",
         "termination_penalty": None,
         "normalizer": "LimitsNormalizer",
-        "preprocess_fns": [],
+        "preprocess_fns": ["navigation_angles_to_sincos"],
         "clip_denoised": True,
         "use_padding": False,
         "max_path_length": 310,
