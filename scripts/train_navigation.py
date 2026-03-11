@@ -62,7 +62,9 @@ args = Parser().parse_args("diffusion")
 # ---------------------------------- dataset ----------------------------------#
 # -----------------------------------------------------------------------------#
 
-dataset = H5GoalDataset(
+dataset_config = utils.Config(
+    "datasets.H5GoalDataset",
+    savepath=(args.savepath, "dataset_config.pkl"),
     h5_path=H5_PATH,
     final_goal=FINAL_GOAL,
     horizon=args.horizon,
@@ -73,9 +75,16 @@ dataset = H5GoalDataset(
     use_padding=args.use_padding,
     jump=args.jump,
     jump_action=args.jump_action,
+    preprocess_fns=args.preprocess_fns,
 )
 
-renderer = NavigationRenderer()
+render_config = utils.Config(
+    args.renderer,
+    savepath=(args.savepath, "render_config.pkl"),
+)
+
+dataset = dataset_config()
+renderer = render_config()
 
 observation_dim = dataset.observation_dim
 action_dim = dataset.action_dim * args.jump
