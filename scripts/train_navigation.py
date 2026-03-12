@@ -121,6 +121,7 @@ diffusion_config = utils.Config(
     clip_denoised=args.clip_denoised,
     predict_epsilon=args.predict_epsilon,
     action_weight=args.action_weight,
+    action_weight_all_steps=args.action_weight_all_steps,
     loss_weights=args.loss_weights,
     loss_discount=args.loss_discount,
     device=args.device,

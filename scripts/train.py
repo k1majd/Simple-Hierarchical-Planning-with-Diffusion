@@ -83,6 +83,7 @@ diffusion_config = utils.Config(
     predict_epsilon=args.predict_epsilon,
     ## loss weighting
     action_weight=args.action_weight,
+    action_weight_all_steps=args.action_weight_all_steps,
     loss_weights=args.loss_weights,
     loss_discount=args.loss_discount,
     device=args.device,

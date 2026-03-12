@@ -33,6 +33,7 @@ base = {
         "condition": True,
         "n_diffusion_steps": 256,
         "action_weight": 10,
+        "action_weight_all_steps": False,
         "loss_weights": None,
         "loss_discount": 1,
         "predict_epsilon": False,

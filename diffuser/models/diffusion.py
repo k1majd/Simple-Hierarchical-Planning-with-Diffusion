@@ -25,6 +25,7 @@ class GaussianDiffusion(nn.Module):
         clip_denoised=False,
         predict_epsilon=True,
         action_weight=1.0,
+        action_weight_all_steps=False,
         loss_discount=1.0,
         loss_weights=None,
         condition=True,
@@ -89,7 +90,10 @@ class GaussianDiffusion(nn.Module):
 
         ## get loss coefficients and initialize objective
         loss_weights = self.get_loss_weights(
-            action_weight, loss_discount, loss_weights
+            action_weight,
+            loss_discount,
+            loss_weights,
+            action_weight_all_steps=action_weight_all_steps,
         )
         self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
         self.condition = condition
@@ -163,16 +167,25 @@ class GaussianDiffusion(nn.Module):
 
         return heading_error, hitch_error
 
-    def get_loss_weights(self, action_weight, discount, weights_dict):
+    def get_loss_weights(
+        self,
+        action_weight,
+        discount,
+        weights_dict,
+        action_weight_all_steps=False,
+    ):
         """
         sets loss coefficients for trajectory
 
         action_weight   : float
-            coefficient on first action loss
+            coefficient on first action loss (or all steps if action_weight_all_steps)
         discount   : float
             multiplies t^th timestep of trajectory loss by discount**t
         weights_dict    : dict
             { i: c } multiplies dimension i of observation loss by c
+        action_weight_all_steps : bool
+            if True, apply action_weight to action dims at every timestep;
+            if False (default), only apply to the first timestep (a0)
         """
         self.action_weight = action_weight
 
@@ -189,8 +202,11 @@ class GaussianDiffusion(nn.Module):
         discounts = discounts / discounts.mean()
         loss_weights = torch.einsum("h,t->ht", discounts, dim_weights)
 
-        ## manually set a0 weight
-        loss_weights[0, : self.action_dim] = action_weight
+        ## set action weight
+        if action_weight_all_steps:
+            loss_weights[:, : self.action_dim] = action_weight
+        else:
+            loss_weights[0, : self.action_dim] = action_weight
         return loss_weights
 
     # ------------------------------------------ sampling ------------------------------------------#
