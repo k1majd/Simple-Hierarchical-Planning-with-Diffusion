@@ -46,7 +46,7 @@ PROJECT_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..")
 )
 HL_LOG_DIR = os.path.join(
-    PROJECT_ROOT, "logs", "navigation", "diffusion", "H255_T256_J15"
+    PROJECT_ROOT, "logs", "navigation", "diffusion", "H255_T256_J15_obs_only"
 )
 HL_HORIZON = 255
 HL_JUMP = 15
@@ -206,8 +206,8 @@ def main():
     parser.add_argument(
         "--start_goal_idx",
         type=int,
-        default=0,
-        help="Index into GOAL_POINTS for the start position (default: 0)",
+        default=5,
+        help="Index into GOAL_POINTS for the start position (default: 5)",
     )
     parser.add_argument(
         "--end_goal_idx",

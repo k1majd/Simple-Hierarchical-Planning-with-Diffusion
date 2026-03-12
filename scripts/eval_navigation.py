@@ -73,17 +73,32 @@ LL_HORIZON = 16
 LL_JUMP = 1
 LL_JUMP_ACTION = False
 
-HL_LOG_DIR = "logs/navigation/diffusion/H255_T256_J15_old"
-LL_LOG_DIR = "logs/navigation/diffusion/H16_T128_J1_old"
+HL_LOG_DIR = "logs/navigation/diffusion/H255_T256_J15"
+LL_LOG_DIR = "logs/navigation/diffusion/H16_T128_J1"
 
 
 # ---------------------------------------------------------------------------
 # Helpers (must match training observation layout)
 # ---------------------------------------------------------------------------
+def state4d_to_obs9d(state):
+    """
+    [x, y, θ₁, θ₂] → 9-D [x, y, sin(θ₁), cos(θ₁), sin(θ₂), cos(θ₂), v, sin(δ), cos(δ)].
+    Assumes v=0, δ=0.
+    """
+    x, y, t1, t2 = state[:4]
+    return np.array(
+        [x, y, np.sin(t1), np.cos(t1), np.sin(t2), np.cos(t2), 0.0, 0.0, 1.0],
+        dtype=np.float32,
+    )
+
 def state4d_to_obs6d(state):
     x, y, t1, t2 = state[:4]
     return np.array([x, y, t1, t2, 0.0, 0.0], dtype=np.float32)
 
+def obs9d_to_state4d(obs):
+    return np.array(
+        [float(obs[0]), float(obs[1]), float(obs[2]), float(obs[4])]
+    )
 
 def obs6d_to_state4d(obs):
     return np.array(
@@ -568,8 +583,8 @@ def main():
 
         test_results = []
         for test in tests:
-            start_obs = state4d_to_obs6d(test["start"])
-            goal_obs = state4d_to_obs6d(test["goal"])
+            start_obs = state4d_to_obs9d(test["start"])
+            goal_obs = state4d_to_obs9d(test["goal"])
 
             samples = []
             metrics_list = []
@@ -578,8 +593,8 @@ def main():
                     traj_raw, hl_wp_raw = plan_hierarchical(
                         hl_policy, ll_policy, start_obs, goal_obs
                     )
-                traj_4d = np.array([obs6d_to_state4d(o) for o in traj_raw])
-                hl_wp_4d = np.array([obs6d_to_state4d(o) for o in hl_wp_raw])
+                traj_4d = np.array([obs9d_to_state4d(o) for o in traj_raw])
+                hl_wp_4d = np.array([obs9d_to_state4d(o) for o in hl_wp_raw])
                 samples.append((traj_4d, hl_wp_4d))
                 metrics_list.append(
                     compute_metrics(traj_4d, test["start"], test["goal"])
