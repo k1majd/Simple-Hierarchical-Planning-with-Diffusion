@@ -6,8 +6,192 @@ import pdb
 from diffuser.guides.policies import Policy
 import diffuser.datasets as datasets
 import diffuser.utils as utils
-from diffuser.models.hier_diffusion import HierDiffusion
 import os
+import matplotlib.pyplot as plt
+
+
+MAZE_BOUNDS = {
+    "maze2d-umaze-v1": (0, 5, 0, 5),
+    "maze2d-medium-v1": (0, 8, 0, 8),
+    "maze2d-large-v1": (0, 9, 0, 12),
+}
+
+
+def to_maze_coords(observations, env_name):
+    """Convert raw observations to normalized (0-1) maze plotting coords."""
+    obs = observations[:, :2] + 0.5
+    bounds = MAZE_BOUNDS[env_name]
+    if len(bounds) == 2:
+        _, scale = bounds
+        obs = obs / scale
+    elif len(bounds) == 4:
+        _, iscale, _, jscale = bounds
+        obs[:, 0] = obs[:, 0] / iscale
+        obs[:, 1] = obs[:, 1] / jscale
+    return obs
+
+
+def plot_sample(
+    env_name,
+    background,
+    rollout,
+    hl_plan,
+    target,
+    init_obs,
+    score,
+    idx,
+    savepath,
+):
+    """Render a single sample: maze background + HL waypoints + executed rollout."""
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    extent = (0, 1, 1, 0)
+
+    # --- Left: HL plan (diffusion output) ---
+    ax = axes[0]
+    ax.imshow(
+        background * 0.5, extent=extent, cmap=plt.cm.binary, vmin=0, vmax=1
+    )
+    hl_coords = to_maze_coords(hl_plan, env_name)
+    colors_hl = plt.cm.magma(np.linspace(0, 1, len(hl_coords)))
+    ax.plot(
+        hl_coords[:, 1],
+        hl_coords[:, 0],
+        c="magenta",
+        linewidth=1.5,
+        zorder=10,
+        label="HL plan",
+    )
+    ax.scatter(hl_coords[:, 1], hl_coords[:, 0], c=colors_hl, s=20, zorder=20)
+    # Mark start/goal
+    start_c = to_maze_coords(init_obs[np.newaxis, :], env_name)[0]
+    goal_c = to_maze_coords(np.array([[*target, 0, 0]]), env_name)[0]
+    ax.scatter(
+        start_c[1],
+        start_c[0],
+        color="green",
+        marker="o",
+        s=100,
+        zorder=30,
+        label="Start",
+    )
+    ax.scatter(
+        goal_c[1],
+        goal_c[0],
+        color="red",
+        marker="X",
+        s=100,
+        zorder=30,
+        label="Goal",
+    )
+    ax.set_title(f"Sample {idx}: HL waypoints")
+    ax.legend(loc="upper right", fontsize=7)
+    ax.axis("off")
+
+    # --- Right: Executed rollout ---
+    ax = axes[1]
+    ax.imshow(
+        background * 0.5, extent=extent, cmap=plt.cm.binary, vmin=0, vmax=1
+    )
+    roll_arr = np.array(rollout)
+    roll_coords = to_maze_coords(roll_arr, env_name)
+    colors_roll = plt.cm.jet(np.linspace(0, 1, len(roll_coords)))
+    ax.plot(
+        roll_coords[:, 1],
+        roll_coords[:, 0],
+        c="black",
+        linewidth=1.0,
+        zorder=10,
+        label="Rollout",
+    )
+    ax.scatter(
+        roll_coords[:, 1], roll_coords[:, 0], c=colors_roll, s=8, zorder=20
+    )
+    # Also overlay HL waypoints faintly
+    ax.scatter(
+        hl_coords[:, 1],
+        hl_coords[:, 0],
+        c="magenta",
+        marker="D",
+        s=15,
+        alpha=0.4,
+        zorder=15,
+        label="HL waypoints",
+    )
+    ax.scatter(
+        start_c[1],
+        start_c[0],
+        color="green",
+        marker="o",
+        s=100,
+        zorder=30,
+        label="Start",
+    )
+    ax.scatter(
+        goal_c[1],
+        goal_c[0],
+        color="red",
+        marker="X",
+        s=100,
+        zorder=30,
+        label="Goal",
+    )
+    ax.set_title(f"Sample {idx}: Rollout (score={score:.3f})")
+    ax.legend(loc="upper right", fontsize=7)
+    ax.axis("off")
+
+    plt.tight_layout()
+    fig_path = join(savepath, f"idx{idx}_render.png")
+    plt.savefig(fig_path, dpi=150)
+    plt.close(fig)
+    print(f"  Saved render → {fig_path}")
+
+
+def plot_summary(
+    env_name, background, all_rollouts, all_scores, target, savepath
+):
+    """Render all rollouts overlaid on the maze."""
+    fig, ax = plt.subplots(figsize=(6, 6))
+    extent = (0, 1, 1, 0)
+    ax.imshow(
+        background * 0.5, extent=extent, cmap=plt.cm.binary, vmin=0, vmax=1
+    )
+
+    cmap = plt.cm.tab10
+    for idx, rollout in enumerate(all_rollouts):
+        roll_arr = np.array(rollout)
+        roll_coords = to_maze_coords(roll_arr, env_name)
+        color = cmap(idx / max(len(all_rollouts) - 1, 1))
+        ax.plot(
+            roll_coords[:, 1],
+            roll_coords[:, 0],
+            color=color,
+            linewidth=1.2,
+            alpha=0.7,
+            label=f"S{idx} ({all_scores[idx]:.2f})" if idx < 10 else None,
+        )
+
+    goal_c = to_maze_coords(np.array([[*target, 0, 0]]), env_name)[0]
+    ax.scatter(
+        goal_c[1],
+        goal_c[0],
+        color="red",
+        marker="X",
+        s=120,
+        zorder=30,
+        label="Goal",
+    )
+    ax.set_title(
+        f"All rollouts ({len(all_rollouts)} samples, "
+        f"mean score={np.mean(all_scores):.3f})"
+    )
+    ax.legend(loc="upper right", fontsize=6)
+    ax.axis("off")
+
+    plt.tight_layout()
+    fig_path = join(savepath, "summary_render.png")
+    plt.savefig(fig_path, dpi=150)
+    plt.close(fig)
+    print(f"Saved summary → {fig_path}")
 
 
 class HLParser(utils.Parser):
@@ -29,7 +213,7 @@ ll_args = LLParser().parse_args("plan")
 # ---------------------------------- loading ----------------------------------#
 
 
-n_samples = 500
+n_samples = 10
 
 loadpath = (hl_args.logbase, hl_args.dataset, hl_args.diffusion_loadpath)
 
@@ -65,6 +249,9 @@ scores = []
 rollouts = []
 plans = []
 track_action = []
+
+# Get maze background for rendering
+maze_background = env_eval.maze_arr == 10
 
 
 for i in range(n_samples):
@@ -113,7 +300,9 @@ for i in range(n_samples):
                 next_waypoint[2:] = 0
 
             state = observation.copy()
-            action = next_waypoint[:2] - state[:2] + (next_waypoint[2:] - state[2:])
+            action = (
+                next_waypoint[:2] - state[:2] + (next_waypoint[2:] - state[2:])
+            )
 
             next_observation, reward, terminal, _ = env_eval.step(action)
             t += 1
@@ -133,6 +322,7 @@ for i in range(n_samples):
     rollouts.append(rollout)
     total_rewards.append(total_reward)
     scores.append(env_eval.get_normalized_score(sum(total_reward)))
+    plans.append(hl_plan[0])  # (M, obs_dim)
 
     ## save result as a json file
     json_path = join(hl_args.savepath, f"idx{i}_rollout.json")
@@ -142,4 +332,29 @@ for i in range(n_samples):
         "return": total_reward,
         "term": terminal,
     }
-    json.dump(json_data, open(json_path, "w"), indent=2, sort_keys=True)
+    with open(json_path, "w") as f:
+        json.dump(json_data, f, indent=2, sort_keys=True)
+
+    ## render per-sample visualization
+    plot_sample(
+        hl_args.dataset,
+        maze_background,
+        rollout,
+        hl_plan[0],
+        target,
+        init_obs,
+        score,
+        i,
+        hl_args.savepath,
+    )
+
+## render summary of all rollouts
+plot_summary(
+    hl_args.dataset,
+    maze_background,
+    rollouts,
+    scores,
+    target,
+    hl_args.savepath,
+)
+print(f"\nDone. Mean score: {np.mean(scores):.4f} | Std: {np.std(scores):.4f}")
