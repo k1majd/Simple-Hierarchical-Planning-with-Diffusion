@@ -342,7 +342,7 @@ MAZE_BOUNDS = {
 class MazeRenderer:
     def __init__(self, env):
         if type(env) is str:
-            env = load_environment(env)
+            env = _load_environment(env)
             self._config = env._config
             self._background = self._config != " "
         self._remove_margins = False
@@ -398,7 +398,7 @@ class MazeRenderer:
 class Maze2dRenderer(MazeRenderer):
     def __init__(self, env, observation_dim=None):
         self.env_name = env
-        self.env = load_environment(env)
+        self.env = _load_environment(env)
         self._background = self.env.maze_arr == 10
         self.observation_dim = np.prod(self.env.observation_space.shape)
         self.action_dim = np.prod(self.env.action_space.shape)

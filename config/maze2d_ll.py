@@ -94,7 +94,6 @@ base = {
         ## serialization
         "logbase": logbase,
         "vis_freq": 10,
-        "logbase": "/common/users/cc1547/projects/diffuser/logs",
         "prefix": "plans/release",
         "exp_name": watch(plan_args_to_watch),
         "suffix": "0",

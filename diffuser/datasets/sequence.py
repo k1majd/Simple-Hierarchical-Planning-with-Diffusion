@@ -7,6 +7,7 @@ import os
 from .preprocessing import get_preprocess_fn
 from .normalization import DatasetNormalizer
 from .buffer import ReplayBuffer
+from .d4rl import load_environment, sequence_dataset
 from math import pi
 import h5py
 from tqdm import tqdm
